@@ -4,6 +4,11 @@ config.json
 # feature branch (batch registration) — credential stores, never commit
 accounts.jsonl
 accounts*.jsonl
+accounts.db
+accounts.db-wal
+accounts.db-shm
+*.db
+*.sqlite3
 *.token
 mailbox.json
 mailbox.local.json

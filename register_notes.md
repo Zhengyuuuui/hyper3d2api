@@ -17,7 +17,38 @@
 | 新号额度 | ✅ **balance = 50**，`plan = Free`，`trial_eligibility = true`（与原号同起点） |
 | 单账号耗时 | 约 **13-27 秒**（send_code → 收码 → register） |
 
-产物：`accounts.jsonl`（3 条，gitignored）。
+产物：**SQLite `accounts.db`**（唯一数据源，gitignored）+ `accounts.jsonl`（镜像导出）。
+
+### 账号存储（SQLite）
+
+`store.py` —— 账号库 + 用量台账。
+
+```
+accounts.db
+├── accounts(id, email UNIQUE, username, password, user_uuid UNIQUE, token,
+│            mailbox_id, balance, plan, trial_eligibility, status,
+│            credits_used, gen_count, last_used_at, last_checked_at,
+│            registered_at, note)
+└── ledger(id, email, job_id, kind, model, credits, balance_after, created_at)
+```
+
+- `status`：`active` / `banned` / `exhausted` / `disabled`
+- `pick_usable(min_balance)`：给 bridge 挑「可用且余额够」的号（余额降序 + 使用次数升序）
+- `record_use(...)`：每次生成写台账（扣费 + 计数）
+- `set_balance` / `mark_status`：状态回写
+- `import_jsonl()`：幂等导入历史 `accounts.jsonl`（重复 email 走更新，**不覆盖运行时计数**）
+
+```bash
+python3 store.py init            # 建库
+python3 store.py import-jsonl accounts.jsonl
+python3 store.py list [--status active] [--min-balance 5]
+python3 store.py stats           # 总数 / 总余额 / 生成数 / 已消耗
+python3 store.py get <email>
+python3 store.py verify          # 遍历全部账号，拉真实余额并回写
+python3 store.py pick --min-balance 5
+```
+
+**入库结果（2026-10-08）**：4 个账号，合计 **200 credits**，全部 `active` / `Free`。
 
 ---
 

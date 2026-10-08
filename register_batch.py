@@ -27,11 +27,13 @@ from typing import Dict, List, Optional
 
 import mailbox as mailmod
 import register as regmod
+from store import AccountStore
 from turnstile import TurnstileTokenSource
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "config.json")
 ACCOUNTS_PATH = os.path.join(HERE, "accounts.jsonl")
+DB_PATH = os.path.join(HERE, "accounts.db")
 
 DEFAULTS = {
     "mail_api_base": "https://yunex-temp-email.zysgm123.workers.dev",
@@ -113,9 +115,12 @@ def register_one(cfg: Dict, tokens: TurnstileTokenSource, idx: int,
         mb.close()
 
 
-def append_account(acct: Dict) -> None:
+def save_account(acct: Dict, store: AccountStore) -> int:
+    """Persist to SQLite (single source of truth). Also mirrors to jsonl."""
+    rid = store.upsert(acct)
     with open(ACCOUNTS_PATH, "a", encoding="utf-8") as f:
         f.write(json.dumps(acct, ensure_ascii=False) + "\n")
+    return rid
 
 
 def verify_account(token: str, timeout: float = 30) -> Dict:
@@ -145,6 +150,8 @@ def main():
         sys.exit(1)
 
     print(f"[batch] mail={cfg['mail_api_base']} domain={cfg['mail_domain']}")
+    store = AccountStore(DB_PATH)
+    print(f"[batch] db={DB_PATH}  ({store.stats()['count']} existing)")
     tokens = TurnstileTokenSource(port=cfg["cdp_port"], site_key=cfg["site_key"])
     if not tokens.connect(reload=False):
         print("ERROR: cannot attach to Chrome CDP (is hyper3d.ai open?)")
@@ -161,7 +168,7 @@ def main():
                 print(f"  verified: balance={info['balance']} plan={info['plan']}")
             except Exception as e:
                 print(f"  (verify failed: {e})")
-            append_account(acct)
+            save_account(acct, store)
             ok += 1
         if i < args.count:
             lo, hi = cfg["register_delay"]
@@ -169,7 +176,9 @@ def main():
             print(f"  ... sleeping {d:.0f}s before next")
             time.sleep(d)
 
-    print(f"\n[batch] done: {ok}/{args.count} registered -> {ACCOUNTS_PATH}")
+    print(f"\n[batch] done: {ok}/{args.count} registered -> {DB_PATH}")
+    print(f"[batch] store: {json.dumps(store.stats(), ensure_ascii=False)}")
+    store.close()
 
 
 if __name__ == "__main__":
