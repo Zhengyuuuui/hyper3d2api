@@ -30,9 +30,12 @@ from fastapi.responses import FileResponse, JSONResponse
 
 import registry as R
 from hyper3d import Hyper3DClient, Hyper3DError
+from store import AccountStore
 from turnstile import TurnstileTokenSource
 
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+HERE = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(HERE, "config.json")
+DB_PATH = os.path.join(HERE, "accounts.db")
 DEFAULT_CONFIG = {
     "api_token": "sk-hyper3d-local",
     "token": "",                 # Hyper3D JWT (localStorage.token)
@@ -63,6 +66,18 @@ _tokens = TurnstileTokenSource(port=CONFIG["cdp_port"], site_key=CONFIG["site_ke
                                human_pacing=CONFIG["human_pacing"])
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
+
+# account pool
+_STORE: Optional[AccountStore] = None
+_STORE_LOCK = threading.Lock()
+
+
+def account_store() -> AccountStore:
+    global _STORE
+    with _STORE_LOCK:
+        if _STORE is None:
+            _STORE = AccountStore(DB_PATH)
+    return _STORE
 
 
 # --------------------------------------------------------------------------
@@ -345,18 +360,152 @@ def get_job(job_id: str, authorization: Optional[str] = Depends(check_auth)):
 
 @app.get("/health")
 def health():
+    st = account_store()
     return {
         "ok": True,
         "upstream_token_configured": bool(CONFIG.get("token")),
         "turnstile_connected": _tokens.healthy(),
         "models": [m["id"] for m in R.list_models()["data"]],
+        "accounts": st.stats(),
     }
+
+
+# --------------------------------------------------------------------------
+# admin API (used by console.html)
+# --------------------------------------------------------------------------
+@app.get("/admin/api/overview")
+def admin_overview(authorization: Optional[str] = Depends(check_auth)):
+    st = account_store()
+    with _jobs_lock:
+        jobs = list(_jobs.values())
+    done = [j for j in jobs if j.get("status") in ("succeeded", "failed")]
+    succeeded = [j for j in jobs if j.get("status") == "succeeded"]
+    failed = [j for j in jobs if j.get("status") == "failed"]
+    return {
+        "accounts": st.stats(),
+        "jobs": {"total": len(jobs), "succeeded": len(succeeded),
+                 "failed": len(failed), "in_flight": len(jobs) - len(done)},
+        "pool": {"usable": len(st.list(status="active", min_balance=CONFIG["min_credits"]))},
+        "upstream": {
+            "token_configured": bool(CONFIG.get("token")),
+            "turnstile_connected": _tokens.healthy(),
+            "cdp_port": CONFIG["cdp_port"],
+            "min_credits": CONFIG["min_credits"],
+        },
+    }
+
+
+@app.get("/admin/api/accounts")
+def admin_accounts(authorization: Optional[str] = Depends(check_auth),
+                   status: Optional[str] = None,
+                   min_balance: Optional[float] = None):
+    rows = account_store().list(status=status, min_balance=min_balance)
+    # never expose raw tokens in listing
+    for r in rows:
+        r["token_preview"] = (r.get("token") or "")[:16] + "…" if r.get("token") else None
+        r.pop("token", None)
+    return rows
+
+
+@app.get("/admin/api/accounts/{email}")
+def admin_account(email: str, authorization: Optional[str] = Depends(check_auth)):
+    r = account_store().get(email)
+    if not r:
+        raise err("not_found", f"account {email} not found", 404)
+    r["token_preview"] = (r.get("token") or "")[:20] + "…"
+    r.pop("token", None)
+    return r
+
+
+@app.get("/admin/api/accounts/{email}/token")
+def admin_account_token(email: str, authorization: Optional[str] = Depends(check_auth)):
+    r = account_store().get(email)
+    if not r:
+        raise err("not_found", f"account {email} not found", 404)
+    return {"email": email, "token": r.get("token")}
+
+
+@app.post("/admin/api/accounts/{email}/check")
+def admin_account_check(email: str, authorization: Optional[str] = Depends(check_auth)):
+    r = account_store().get(email)
+    if not r:
+        raise err("not_found", f"account {email} not found", 404)
+    client = Hyper3DClient(r["token"], timeout=25)
+    try:
+        bal = client.credits()
+        meta = client.balance()
+        plan = (meta.get("subscriptions") or {}).get("highest_level")
+        trial = (meta.get("subscriptions") or {}).get("trial_eligibility")
+        status = "active"
+        if bal is not None and bal < CONFIG["min_credits"]:
+            status = "exhausted"
+        account_store().set_balance(email, bal, plan, trial)
+        account_store().mark_status(email, status)
+        return {"email": email, "balance": bal, "plan": plan,
+                "trial_eligibility": trial, "status": status}
+    except Exception as e:  # noqa: BLE001
+        account_store().mark_status(email, "invalid", str(e)[:200])
+        raise err("upstream_error", str(e), 502)
+    finally:
+        client.close()
+
+
+@app.post("/admin/api/accounts/{email}/status")
+def admin_account_status(email: str, body: Dict[str, Any],
+                         authorization: Optional[str] = Depends(check_auth)):
+    if not account_store().get(email):
+        raise err("not_found", f"account {email} not found", 404)
+    status = body.get("status")
+    if status not in ("active", "banned", "exhausted", "disabled"):
+        raise err("bad_request", "status must be active|banned|exhausted|disabled", 400)
+    account_store().mark_status(email, status, body.get("note"))
+    return {"email": email, "status": status}
+
+
+@app.delete("/admin/api/accounts/{email}")
+def admin_account_delete(email: str, authorization: Optional[str] = Depends(check_auth)):
+    st = account_store()
+    if not st.get(email):
+        raise err("not_found", f"account {email} not found", 404)
+    with st._conn:  # noqa: SLF001
+        st._conn.execute("DELETE FROM accounts WHERE email = ?", (email,))  # noqa: SLF001
+    return {"deleted": email}
+
+
+@app.get("/admin/api/jobs")
+def admin_jobs(authorization: Optional[str] = Depends(check_auth),
+               limit: int = 50):
+    with _jobs_lock:
+        jobs = list(_jobs.values())
+    jobs.sort(key=lambda j: j.get("created") or 0, reverse=True)
+    out = []
+    for j in jobs[:limit]:
+        p = _public_job(j)
+        p["kind"] = j.get("kind")
+        p["plan_model"] = (j.get("plan") or {}).get("params", {}).get("model")
+        out.append(p)
+    return out
+
+
+@app.get("/admin/api/ledger")
+def admin_ledger(authorization: Optional[str] = Depends(check_auth),
+                 email: Optional[str] = None, limit: int = 100):
+    st = account_store()
+    sql = "SELECT * FROM ledger"
+    args: list = []
+    if email:
+        sql += " WHERE email = ?"
+        args.append(email)
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(limit)
+    rows = [dict(r) for r in st._conn.execute(sql, args).fetchall()]  # noqa: SLF001
+    return rows
 
 
 @app.get("/")
 @app.get("/console")
 def console():
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "console.html")
+    path = os.path.join(HERE, "console.html")
     if os.path.exists(path):
         return FileResponse(path)
     return JSONResponse({"service": "hyper3d2api", "docs": "/docs"})

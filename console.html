@@ -1,156 +1,650 @@
-<!DOCTYPE html>
-<html lang="zh">
+<!doctype html>
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>hyper3d2api Console</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hyper3d2api</title>
 <style>
-  :root{--bg:#0d0f14;--card:#161a22;--line:#252b36;--fg:#e6e9ef;--dim:#8b94a7;--acc:#6ea8fe;--ok:#4ade80;--warn:#fbbf24;--err:#f87171}
-  *{box-sizing:border-box}
-  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
-  header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-  h1{font-size:16px;margin:0;font-weight:600}
-  .pill{padding:3px 10px;border-radius:99px;font-size:12px;border:1px solid var(--line);color:var(--dim)}
-  .pill.ok{color:var(--ok);border-color:#1e4d33}
-  .pill.err{color:var(--err);border-color:#4d1e1e}
-  main{padding:22px;display:grid;gap:18px;grid-template-columns:1fr 1fr;max-width:1180px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
-  .card h2{font-size:13px;margin:0 0 12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em}
-  label{display:block;font-size:12px;color:var(--dim);margin:10px 0 4px}
-  select,input,textarea{width:100%;background:#0b0e13;border:1px solid var(--line);color:var(--fg);
-    border-radius:7px;padding:8px 10px;font:inherit}
-  textarea{min-height:64px;resize:vertical}
-  button{margin-top:14px;background:var(--acc);color:#08111f;border:0;border-radius:7px;
-    padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  pre{background:#0b0e13;border:1px solid var(--line);border-radius:7px;padding:12px;
-    overflow:auto;max-height:420px;font-size:12px;white-space:pre-wrap;word-break:break-all}
-  .row{display:flex;gap:10px}.row>*{flex:1}
-  a{color:var(--acc)}
-  .muted{color:var(--dim);font-size:12px}
-  table{width:100%;border-collapse:collapse;font-size:13px}
-  td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left}
-  th{color:var(--dim);font-weight:500;font-size:12px}
-  .err-t{color:var(--err)}.ok-t{color:var(--ok)}
+  :root {
+    color-scheme: light dark;
+    --bg: #0f1115;
+    --panel: #171a21;
+    --edge: #262a33;
+    --text: #e6e8ec;
+    --muted: #8b93a3;
+    --accent: #5b8cff;
+    --ok: #35b37e;
+    --warn: #d9a13b;
+    --bad: #e0566b;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --edge: #e3e6eb;
+      --text: #1a1d23;
+      --muted: #6b7280;
+      --accent: #2f6bff;
+      --ok: #1c8a5c;
+      --warn: #a97a12;
+      --bad: #c93a4f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.55 -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; border-bottom: 1px solid var(--edge);
+    position: sticky; top: 0; background: var(--panel); z-index: 5;
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+  header .spacer { flex: 1; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button {
+    background: none; border: 1px solid transparent; color: var(--muted);
+    padding: 5px 11px; border-radius: 7px; cursor: pointer; font: inherit;
+  }
+  nav button[aria-selected="true"] { color: var(--text); border-color: var(--edge); background: var(--bg); }
+  main { padding: 20px; max-width: 1240px; margin: 0 auto; }
+  section[hidden] { display: none; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 12px; padding: 16px; margin-bottom: 16px;
+  }
+  .panel h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .stat { background: var(--bg); border: 1px solid var(--edge); border-radius: 9px; padding: 11px 13px; }
+  .stat b { display: block; font-size: 21px; font-weight: 650; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--edge); font-size: 13px; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  tr:last-child td { border-bottom: 0; }
+  code, kbd, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre {
+    background: var(--bg); border: 1px solid var(--edge); border-radius: 8px;
+    padding: 10px 12px; overflow: auto; max-height: 320px; font-size: 12px;
+  }
+  input, select, textarea {
+    background: var(--bg); border: 1px solid var(--edge); color: var(--text);
+    border-radius: 7px; padding: 6px 9px; font: inherit; width: 100%;
+  }
+  textarea { min-height: 92px; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .row > * { flex: 1 1 130px; }
+  button {
+    background: var(--accent); border: 0; color: #fff; border-radius: 7px;
+    padding: 7px 13px; cursor: pointer; font: inherit; white-space: nowrap;
+  }
+  button.ghost { background: none; border: 1px solid var(--edge); color: var(--text); }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  button.danger { background: var(--bad); }
+  button.start { background: color-mix(in srgb, var(--ok) 22%, transparent); border: 1px solid var(--ok); color: var(--ok); }
+  button.stop { background: color-mix(in srgb, var(--bad) 20%, transparent); border: 1px solid var(--bad); color: var(--bad); }
+  button[disabled] { opacity: .5; cursor: not-allowed; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; border: 1px solid var(--edge); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .muted { color: var(--muted); }
+  .tiny { font-size: 11px; }
+  .stale { color: var(--bad); }
+  .mono { font-family: ui-monospace, monospace; font-size: 12px; }
+  .hint {
+    border: 1px solid var(--edge); border-left: 3px solid var(--accent);
+    border-radius: 7px; padding: 10px 12px; background: color-mix(in srgb, var(--accent) 7%, transparent);
+  }
+  .hint pre { margin: 8px 0 6px; padding: 8px 10px; overflow-x: auto; background: var(--bg); border: 1px solid var(--edge); border-radius: 6px; }
+  .flash {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 9px;
+    padding: 9px 15px; box-shadow: 0 8px 30px rgb(0 0 0 / .28); z-index: 20;
+  }
+  .flash.bad { border-color: var(--bad); }
+  .flash.ok { border-color: var(--ok); }
+  img.gallery { width: 132px; height: 132px; object-fit: cover; border-radius: 7px; border: 1px solid var(--edge); }
+  video.gallery { width: 220px; border-radius: 7px; border: 1px solid var(--edge); }
+  .secret-field { display: flex; gap: 6px; align-items: stretch; }
+  .secret-field input { flex: 1 1 auto; }
+  .secret-field .reveal { flex: 0 0 auto; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .toolbar .spacer { flex: 1; }
+  @media (max-width: 640px) {
+    main { padding: 12px; }
+    .row > * { flex: 1 1 100%; }
+  }
 </style>
 </head>
 <body>
+
 <header>
   <h1>hyper3d2api</h1>
-  <span class="pill" id="health">checking…</span>
-  <span class="pill" id="bal">balance —</span>
-  <span class="muted">已验证可用：pixverse (v5~v6/c1) · seedream_4_5 · seedream_5_0_lite</span>
+  <nav id="nav">
+    <button data-view="overview" aria-selected="true">概览</button>
+    <button data-view="accounts">号池</button>
+    <button data-view="models">模型</button>
+    <button data-view="generate">生成</button>
+    <button data-view="jobs">任务</button>
+    <button data-view="ledger">台账</button>
+  </nav>
+  <span class="spacer"></span>
+  <span id="conn" class="pill">检查中…</span>
 </header>
 
 <main>
-  <section class="card">
-    <h2>生成</h2>
-    <label>模型</label>
-    <select id="model"></select>
-    <label>Prompt</label>
-    <textarea id="prompt">a red apple on a wooden table</textarea>
-    <div class="row">
-      <div><label>时长 (秒)</label><select id="duration">
-        <option>5</option><option>8</option><option>10</option><option>15</option></select></div>
-      <div><label>分辨率</label><select id="resolution">
-        <option>720p</option><option>1080p</option><option>540p</option><option>360p</option></select></div>
+
+<!-- ============================================================= 概览 -->
+<section id="view-overview" hidden>
+  <div class="panel">
+    <h2>运行状态</h2>
+    <div class="grid" id="stats-grid"></div>
+  </div>
+
+  <div class="panel">
+    <h2>上游连接</h2>
+    <table>
+      <tbody id="upstream-body"></tbody>
+    </table>
+    <div class="hint" style="margin-top:12px">
+      <div><b>生成依赖本机 Chrome（CDP）取 Turnstile token：</b></div>
+      <pre><code>open -na "Google Chrome" --args \
+  --user-data-dir="$HOME/chrome9366-clean" \
+  --remote-debugging-port=9366 \
+  --no-first-run --no-default-browser-check \
+  "https://hyper3d.ai/workspace/video"</code></pre>
+      <div class="tiny muted">登录 hyper3d.ai 后保持该标签页开启即可；端口须与 config 的 <code>cdp_port</code> 一致。</div>
     </div>
+  </div>
+
+  <div class="panel">
+    <h2>最近任务</h2>
+    <table>
+      <thead><tr><th>时间</th><th>类型</th><th>模型</th><th>状态</th><th>费用</th><th>错误</th></tr></thead>
+      <tbody id="overview-jobs"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================= 号池 -->
+<section id="view-accounts" hidden>
+  <div class="panel">
+    <h2>号池</h2>
+    <div class="toolbar">
+      <button id="acc-refresh" class="ghost">刷新</button>
+      <button id="acc-check-all" class="ghost">全部查余额</button>
+      <select id="acc-filter" style="width:auto">
+        <option value="">全部状态</option>
+        <option value="active">active</option>
+        <option value="exhausted">exhausted</option>
+        <option value="banned">banned</option>
+        <option value="disabled">disabled</option>
+      </select>
+      <span class="spacer"></span>
+      <span class="muted" id="acc-count"></span>
+    </div>
+    <table>
+      <thead><tr>
+        <th>账号</th><th>UUID</th><th>余额</th><th>套餐</th><th>状态</th>
+        <th>生成</th><th>已耗</th><th>检查</th><th>操作</th>
+      </tr></thead>
+      <tbody id="accounts-body"></tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <h2>调用示例</h2>
+    <p class="muted" style="margin-top:0">网关把 <code>/v1/*</code> 请求分发到号池；下面是 curl 示例。</p>
+    <pre id="usage-snippet"></pre>
+  </div>
+</section>
+
+<!-- ============================================================= 模型 -->
+<section id="view-models" hidden>
+  <div class="panel">
+    <h2>可用模型</h2>
+    <p class="muted" style="margin-top:0">这些模型已在 Free 号上实测出片，可正常调用。</p>
+    <table>
+      <thead><tr><th>ID</th><th>类型</th><th>归属</th><th>实测产物</th></tr></thead>
+      <tbody id="models-ok"></tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <h2>不可用模型</h2>
+    <p class="muted" style="margin-top:0">
+      两类：<b>provider 非法</b>（服务端枚举里没有，属前端占位值，无法调用）
+      与 <b>服务端付费墙</b>（<code>NEED_ADVANCED_SUBSCRIPTION</code>）。伪造 payload 无效。
+    </p>
+    <table>
+      <thead><tr><th>ID</th><th>类别</th><th>原因</th></tr></thead>
+      <tbody id="models-no"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================= 生成 -->
+<section id="view-generate" hidden>
+  <div class="panel">
+    <h2>在线生成</h2>
     <div class="row">
-      <div><label>比例</label><select id="aspect">
+      <div><label>模型</label><select id="gen-model"></select></div>
+      <div><label>时长 (秒)</label><select id="gen-duration">
+        <option>5</option><option>8</option><option>10</option><option>15</option></select></div>
+      <div><label>分辨率</label><select id="gen-resolution">
+        <option>720p</option><option>1080p</option><option>540p</option><option>360p</option></select></div>
+      <div><label>比例</label><select id="gen-aspect">
         <option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option>
         <option>3:4</option><option>21:9</option></select></div>
-      <div><label>尺寸 (图像)</label><select id="size">
-        <option>2048x2048</option><option>1024x1024</option><option>1728x2304</option>
-        <option>2304x1728</option></select></div>
+      <div><label>尺寸（图像）</label><select id="gen-size">
+        <option>2048x2048</option><option>1024x1024</option>
+        <option>1728x2304</option><option>2304x1728</option></select></div>
     </div>
-    <button id="go">生成</button>
-  </section>
-
-  <section class="card">
+    <label style="margin-top:10px">Prompt</label>
+    <textarea id="gen-prompt">a red apple on a wooden table</textarea>
+    <div class="toolbar" style="margin-top:10px">
+      <button id="gen-go">生成</button>
+      <span class="muted tiny" id="gen-hint">视频约 30–90s；图像通常秒级</span>
+    </div>
+  </div>
+  <div class="panel">
     <h2>结果</h2>
-    <pre id="out">等待请求…</pre>
-    <div id="preview"></div>
-  </section>
+    <pre id="gen-out">等待请求…</pre>
+    <div id="gen-preview"></div>
+  </div>
+</section>
 
-  <section class="card" style="grid-column:1/-1">
-    <h2>可用模型 / 不可用模型</h2>
-    <div class="row">
-      <div><table id="t-ok"></table></div>
-      <div><table id="t-no"></table></div>
+<!-- ============================================================= 任务 -->
+<section id="view-jobs" hidden>
+  <div class="panel">
+    <h2>任务列表</h2>
+    <div class="toolbar">
+      <button id="jobs-refresh" class="ghost">刷新</button>
+      <label class="tiny muted" style="margin:0;display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="jobs-auto" style="width:auto" checked> 自动刷新
+      </label>
+      <span class="spacer"></span>
+      <span class="muted" id="jobs-count"></span>
     </div>
-  </section>
+    <table>
+      <thead><tr>
+        <th>创建</th><th>类型</th><th>模型</th><th>状态</th><th>上游UUID</th>
+        <th>结果</th><th>预览</th>
+      </tr></thead>
+      <tbody id="jobs-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================= 台账 -->
+<section id="view-ledger" hidden>
+  <div class="panel">
+    <h2>调用台账</h2>
+    <div class="toolbar">
+      <input id="ledger-email" placeholder="按邮箱过滤（可空）" style="width:240px">
+      <button id="ledger-refresh" class="ghost">刷新</button>
+      <span class="spacer"></span>
+      <span class="muted" id="ledger-count"></span>
+    </div>
+    <table>
+      <thead><tr><th>时间</th><th>账号</th><th>类型</th><th>模型</th><th>扣费</th><th>余后余额</th><th>Job</th></tr></thead>
+      <tbody id="ledger-body"></tbody>
+    </table>
+  </div>
+</section>
+
 </main>
 
 <script>
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const KEY = "sk-hyper3d-local";
-const $ = s => document.querySelector(s);
-const H = {"Authorization":"Bearer "+KEY,"Content-Type":"application/json"};
 
-async function health(){
-  try{
-    const r = await fetch("/health"); const d = await r.json();
-    const el = $("#health");
-    el.textContent = d.turnstile_connected ? "CDP 已连接" : "CDP 未连接";
-    el.className = "pill " + (d.turnstile_connected ? "ok" : "err");
-  }catch(e){ $("#health").textContent="bridge offline"; $("#health").className="pill err"; }
-  try{
-    const r = await fetch("/v1/balance",{headers:H}); const d = await r.json();
-    const el=$("#bal");
-    el.textContent = "余额 " + d.balance + " · " + (d.plan||"");
-    el.className = "pill " + (Number(d.balance)>0 ? "ok":"err");
-  }catch(e){}
-}
+const state = { view: "overview", jobsAuto: true, jobsTimer: null };
 
-async function models(){
-  const r = await fetch("/v1/models",{headers:H}); const d = await r.json();
-  const sel = $("#model"); sel.innerHTML="";
-  d.data.forEach(m=>{
-    const o=document.createElement("option");
-    o.value=m.id; o.textContent=m.id+"  ("+m.family+")";
-    o.dataset.family=m.family; sel.appendChild(o);
-  });
-  let h="<tr><th>ID</th><th>类型</th><th>实测</th></tr>";
-  d.data.forEach(m=>{ h+=`<tr><td>${m.id}</td><td>${m.family}</td>
-      <td class="ok-t">${(m.verified||[]).join("<br>")}</td></tr>`; });
-  $("#t-ok").innerHTML=h;
-
-  const b = await fetch("/v1/blocked-models",{headers:H}); const bd = await b.json();
-  let h2="<tr><th>ID</th><th>原因</th></tr>";
-  bd.data.forEach(m=>{ h2+=`<tr><td>${m.id}</td><td class="err-t">${m.reason}</td></tr>`; });
-  $("#t-no").innerHTML=h2;
-}
-
-$("#go").onclick = async () => {
-  const m = $("#model").value;
-  const fam = $("#model").selectedOptions[0].dataset.family;
-  const body = {model:m, prompt:$("#prompt").value};
-  if(fam==="video"){ body.duration=Number($("#duration").value);
-                    body.resolution=$("#resolution").value;
-                    body.aspect_ratio=$("#aspect").value; }
-  else { body.size=$("#size").value; }
-
-  $("#go").disabled=true; $("#out").textContent="提交中（取 Turnstile token + 轮询，通常 30-90s）…";
-  $("#preview").innerHTML="";
-  const t0=Date.now();
-  try{
-    const r = await fetch(fam==="video"?"/v1/videos":"/v1/images",
-        {method:"POST",headers:H,body:JSON.stringify(body)});
-    const d = await r.json();
-    $("#out").textContent = JSON.stringify(d,null,2);
-    if(d.output_url){
-      if(fam==="video"){ $("#preview").innerHTML=`<video src="${d.output_url}" controls style="max-width:100%;border-radius:8px;margin-top:12px"></video>`; }
-      else { $("#preview").innerHTML=`<img src="${d.output_url}" style="max-width:100%;border-radius:8px;margin-top:12px">`; }
-    }
-  }catch(e){ $("#out").textContent="请求异常: "+e; }
-  finally{
-    $("#go").disabled=false;
-    $("#out").textContent += "\n\n耗时 "+((Date.now()-t0)/1000).toFixed(1)+"s";
-    health();
+async function api(path, options = {}) {
+  const headers = Object.assign({ "Authorization": "Bearer " + KEY, "Content-Type": "application/json" }, options.headers);
+  const response = await fetch(path, Object.assign({}, options, { headers }));
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const d = body && body.detail;
+    const msg = (d && d.error && (d.error.message || d.error)) || (body && body.error) || response.statusText;
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
   }
+  return body;
+}
+
+function flash(message, kind = "") {
+  const el = document.createElement("div");
+  el.className = "flash " + kind;
+  el.textContent = message;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3600);
+}
+
+function timeAgo(iso) {
+  if (!iso) return "-";
+  const t = new Date(iso).getTime();
+  if (!t) return "-";
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 0) return "刚刚";
+  if (s < 60) return s + " 秒前";
+  if (s < 3600) return Math.round(s / 60) + " 分前";
+  if (s < 86400) return Math.round(s / 3600) + " 时前";
+  return Math.round(s / 86400) + " 天前";
+}
+
+function pill(text, kind = "") { return `<span class="pill ${kind}">${text}</span>`; }
+function row(cells) { return "<tr>" + cells.map((c) => `<td>${c}</td>`).join("") + "</tr>"; }
+
+const ACCOUNT_STATUS = {
+  active: ["正常", "ok"],
+  exhausted: ["额度耗尽", "warn"],
+  banned: ["已封禁", "bad"],
+  disabled: ["已停用", ""],
+  invalid: ["失效", "bad"],
 };
 
-health(); models();
-setInterval(health, 30000);
+function accountStatusCell(acc) {
+  const [label, kind] = ACCOUNT_STATUS[acc.status] || [acc.status || "-", ""];
+  const checked = acc.last_checked_at ? `<br><span class="tiny muted">${timeAgo(acc.last_checked_at)}</span>` : "";
+  return pill(label, kind) + checked;
+}
+
+function balanceCell(acc) {
+  const bal = acc.balance;
+  if (bal == null) return `<span class="muted">未查</span>`;
+  const low = bal < 5;
+  return `<span class="${low ? "stale" : ""}">${bal}</span>`;
+}
+
+const JOB_STATUS = {
+  queued: ["排队中", "warn"], running: ["运行中", "warn"],
+  submitted: ["已提交", "warn"], succeeded: ["完成", "ok"], failed: ["失败", "bad"],
+};
+
+function jobStatusPill(status) {
+  const [label, kind] = JOB_STATUS[status] || [status || "-", ""];
+  return pill(label, kind);
+}
+
+/* ------------------------------------------------------------------ views */
+function show(view) {
+  state.view = view;
+  $$("#nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === view)));
+  $$("main section").forEach((s) => { s.hidden = s.id !== "view-" + view; });
+  if (view !== "jobs" && state.jobsTimer) { clearInterval(state.jobsTimer); state.jobsTimer = null; }
+  render();
+}
+
+$("#nav").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-view]");
+  if (b) show(b.dataset.view);
+});
+
+async function render() {
+  try {
+    if (state.view === "overview") return await renderOverview();
+    if (state.view === "accounts") return await renderAccounts();
+    if (state.view === "models") return await renderModels();
+    if (state.view === "generate") return await renderGenerate();
+    if (state.view === "jobs") return await renderJobs();
+    if (state.view === "ledger") return await renderLedger();
+  } catch (err) { flash(err.message, "bad"); }
+}
+
+async function renderOverview() {
+  const [ov, jobs] = await Promise.all([api("/admin/api/overview"), api("/admin/api/jobs?limit=8")]);
+  const a = ov.accounts || {};
+  const cards = [
+    ["号池账号", a.count ?? 0],
+    ["总余额", a.total_credits ?? 0],
+    ["已用额度", a.credits_used ?? 0],
+    ["生成次数", a.generations ?? 0],
+    ["任务：成功", (ov.jobs && ov.jobs.succeeded) ?? 0],
+    ["任务：失败", (ov.jobs && ov.jobs.failed) ?? 0],
+  ];
+  $("#stats-grid").innerHTML = cards
+    .map(([l, v]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join("");
+
+  const up = ov.upstream || {};
+  $("#upstream-body").innerHTML = [
+    row(["上游 Token", up.token_configured ? pill("已配置", "ok") : pill("未配置", "bad")]),
+    row(["Turnstile / CDP", up.turnstile_connected ? pill("已连接", "ok") : pill("未连接", "bad")]),
+    row(["CDP 端口", `<span class="mono">${up.cdp_port ?? "-"}</span>`]),
+    row(["最低余额阈值", `<span class="mono">${up.min_credits ?? "-"}</span>`]),
+  ].join("");
+
+  $("#overview-jobs").innerHTML = (jobs || []).map((j) => row([
+    timeAgo(j.created ? new Date(j.created * 1000).toISOString() : null),
+    j.kind || "-",
+    `<span class="mono">${j.plan_model || j.model || "-"}</span>`,
+    jobStatusPill(j.status),
+    j.balance_after != null ? `<span class="muted">→ ${j.balance_after}</span>` : "-",
+    j.error ? `<span class="stale tiny">${j.error}</span>` : "",
+  ])).join("") || row(['<td colspan="6" class="muted">还没有任务</td>']);
+}
+
+async function renderAccounts() {
+  const filter = $("#acc-filter").value;
+  const q = filter ? `?status=${encodeURIComponent(filter)}` : "";
+  const rows = await api("/admin/api/accounts" + q);
+  $("#acc-count").textContent = rows.length + " 个账号";
+  $("#accounts-body").innerHTML = rows.map((acc) => row([
+    `<b>${acc.username || acc.email.split("@")[0]}</b><br><span class="tiny mono muted">${acc.email}</span>`,
+    `<span class="mono tiny">${(acc.user_uuid || "").slice(0, 8)}…</span>`,
+    balanceCell(acc),
+    acc.plan || "-",
+    accountStatusCell(acc),
+    acc.gen_count ?? 0,
+    acc.credits_used ?? 0,
+    acc.last_checked_at ? timeAgo(acc.last_checked_at) : `<span class="muted">从未</span>`,
+    [
+      `<button class="ghost small" data-acc-act="check" data-email="${acc.email}">查余额</button>`,
+      acc.status === "active"
+        ? `<button class="stop small" data-acc-act="disable" data-email="${acc.email}">停用</button>`
+        : `<button class="start small" data-acc-act="enable" data-email="${acc.email}">启用</button>`,
+      `<button class="danger small" data-acc-act="delete" data-email="${acc.email}">删除</button>`,
+    ].join(" "),
+  ])).join("") || row(['<td colspan="9" class="muted">号池为空</td>']);
+
+  $("#usage-snippet").textContent =
+`# 视频
+curl -X POST http://127.0.0.1:${location.port || 4870}/v1/videos \\
+  -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \\
+  -d '{"model":"v6","prompt":"a lighthouse at dusk","duration":5,"resolution":"720p"}'
+
+# 图像
+curl -X POST http://127.0.0.1:${location.port || 4870}/v1/images \\
+  -H "Authorization: Bearer ${KEY}" -H "Content-Type: application/json" \\
+  -d '{"model":"seedream_4_5","prompt":"a red apple","size":"2048x2048"}'`;
+}
+
+async function renderModels() {
+  const [models, blocked] = await Promise.all([
+    api("/v1/models"), api("/v1/blocked-models"),
+  ]);
+  $("#models-ok").innerHTML = models.data.map((m) => row([
+    `<code>${m.id}</code>`,
+    m.family,
+    `<span class="tiny muted">${m.owned_by}</span>`,
+    `<span class="tiny">${(m.verified || []).join("<br>")}</span>`,
+  ])).join("");
+
+  const cls = { invalid_provider: ["provider 非法", "bad"], paywall: ["付费墙", "warn"] };
+  $("#models-no").innerHTML = blocked.data.map((m) => {
+    const [label, kind] = cls[m.class] || [m.class || "-", ""];
+    return row([`<code>${m.id}</code>`, pill(label, kind), `<span class="tiny muted">${m.reason}</span>`]);
+  }).join("");
+}
+
+async function renderGenerate() {
+  if ($("#gen-model").options.length === 0) {
+    const models = await api("/v1/models");
+    $("#gen-model").innerHTML = models.data
+      .map((m) => `<option value="${m.id}" data-family="${m.family}">${m.id} (${m.family})</option>`)
+      .join("");
+    $("#gen-model").addEventListener("change", syncGenFields);
+    syncGenFields();
+  }
+}
+
+function syncGenFields() {
+  const sel = $("#gen-model");
+  const fam = sel.selectedOptions[0] ? sel.selectedOptions[0].dataset.family : "video";
+  const isVideo = fam === "video";
+  ["gen-duration", "gen-resolution", "gen-aspect"].forEach((id) => { $("#" + id).disabled = !isVideo; });
+  $("#gen-size").disabled = isVideo;
+}
+
+$("#gen-go").addEventListener("click", async () => {
+  const sel = $("#gen-model");
+  const model = sel.value;
+  const fam = sel.selectedOptions[0].dataset.family;
+  const body = { model, prompt: $("#gen-prompt").value };
+  if (fam === "video") {
+    body.duration = Number($("#gen-duration").value);
+    body.resolution = $("#gen-resolution").value;
+    body.aspect_ratio = $("#gen-aspect").value;
+  } else {
+    body.size = $("#gen-size").value;
+  }
+  $("#gen-go").disabled = true;
+  $("#gen-out").textContent = "提交中（取 Turnstile token + 轮询）…";
+  $("#gen-preview").innerHTML = "";
+  const t0 = Date.now();
+  try {
+    const d = await api(fam === "video" ? "/v1/videos" : "/v1/images",
+      { method: "POST", body: JSON.stringify(body) });
+    $("#gen-out").textContent = JSON.stringify(d, null, 2);
+    if (d.output_url) {
+      $("#gen-preview").innerHTML = fam === "video"
+        ? `<video class="gallery" src="${d.output_url}" controls></video>`
+        : `<img class="gallery" src="${d.output_url}">`;
+    }
+  } catch (err) {
+    $("#gen-out").textContent = "失败: " + err.message;
+  } finally {
+    $("#gen-go").disabled = false;
+    $("#gen-out").textContent += "\n\n耗时 " + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+  }
+});
+
+function previewCell(j) {
+  if (!j.output_url) return "";
+  if (j.kind === "video") return `<video class="gallery" src="${j.output_url}" controls></video>`;
+  if (j.kind === "image") return `<img class="gallery" src="${j.output_url}">`;
+  return "";
+}
+
+async function renderJobs() {
+  const jobs = await api("/admin/api/jobs?limit=60");
+  $("#jobs-count").textContent = jobs.length + " 条";
+  $("#jobs-body").innerHTML = jobs.map((j) => row([
+    j.created ? timeAgo(new Date(j.created * 1000).toISOString()) : "-",
+    j.kind || "-",
+    `<span class="mono">${j.plan_model || j.model || "-"}</span>`,
+    jobStatusPill(j.status),
+    `<span class="mono tiny">${(j.upstream_uuid || "-").slice(0, 8)}</span>`,
+    j.output_url
+      ? `<a href="${j.output_url}" target="_blank" rel="noopener">打开</a>`
+      : (j.error ? `<span class="stale tiny">${j.error}</span>` : "-"),
+    previewCell(j),
+  ])).join("") || row(['<td colspan="7" class="muted">还没有任务</td>']);
+
+  if (state.jobsAuto && !state.jobsTimer) {
+    state.jobsTimer = setInterval(() => {
+      if (state.view === "jobs") renderJobs().catch(() => {});
+    }, 3000);
+  }
+}
+
+async function renderLedger() {
+  const email = $("#ledger-email").value.trim();
+  const q = email ? `?email=${encodeURIComponent(email)}&limit=200` : "?limit=200";
+  const rows = await api("/admin/api/ledger" + q);
+  $("#ledger-count").textContent = rows.length + " 条";
+  $("#ledger-body").innerHTML = rows.map((l) => row([
+    timeAgo(l.created_at),
+    `<span class="mono tiny">${l.email}</span>`,
+    l.kind || "-",
+    `<span class="mono">${l.model || "-"}</span>`,
+    l.credits != null ? `-${l.credits}` : "-",
+    l.balance_after != null ? l.balance_after : "-",
+    `<span class="mono tiny">${(l.job_id || "-").slice(0, 12)}</span>`,
+  ])).join("") || row(['<td colspan="7" class="muted">台账为空</td>']);
+}
+
+/* ---------------------------------------------------------------- actions */
+$("#acc-refresh").addEventListener("click", () => renderAccounts().catch((e) => flash(e.message, "bad")));
+$("#acc-filter").addEventListener("change", () => renderAccounts().catch((e) => flash(e.message, "bad")));
+$("#jobs-refresh").addEventListener("click", () => renderJobs().catch((e) => flash(e.message, "bad")));
+$("#jobs-auto").addEventListener("change", (e) => {
+  state.jobsAuto = e.target.checked;
+  if (!state.jobsAuto && state.jobsTimer) { clearInterval(state.jobsTimer); state.jobsTimer = null; }
+  else if (state.jobsAuto && state.view === "jobs") renderJobs().catch(() => {});
+});
+$("#ledger-refresh").addEventListener("click", () => renderLedger().catch((e) => flash(e.message, "bad")));
+
+$("#accounts-body").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-acc-act]");
+  if (!btn) return;
+  const email = btn.dataset.email;
+  const act = btn.dataset.accAct;
+  btn.disabled = true;
+  try {
+    if (act === "check") {
+      const r = await api(`/admin/api/accounts/${encodeURIComponent(email)}/check`, { method: "POST" });
+      flash(`${email} 余额 ${r.balance}（${r.plan}）`, "ok");
+    } else if (act === "disable") {
+      await api(`/admin/api/accounts/${encodeURIComponent(email)}/status`, { method: "POST", body: JSON.stringify({ status: "disabled" }) });
+      flash("已停用", "ok");
+    } else if (act === "enable") {
+      await api(`/admin/api/accounts/${encodeURIComponent(email)}/status`, { method: "POST", body: JSON.stringify({ status: "active" }) });
+      flash("已启用", "ok");
+    } else if (act === "delete") {
+      if (!confirm("删除 " + email + "？此操作不可撤销。")) return;
+      await api(`/admin/api/accounts/${encodeURIComponent(email)}`, { method: "DELETE" });
+      flash("已删除", "ok");
+    }
+    await renderAccounts();
+  } catch (err) { flash(err.message, "bad"); }
+  finally { btn.disabled = false; }
+});
+
+$("#acc-check-all").addEventListener("click", async (e) => {
+  const btn = e.target; btn.disabled = true;
+  try {
+    const rows = await api("/admin/api/accounts");
+    let ok = 0, fail = 0;
+    for (const a of rows) {
+      try { await api(`/admin/api/accounts/${encodeURIComponent(a.email)}/check`, { method: "POST" }); ok++; }
+      catch (_) { fail++; }
+    }
+    flash(`查余额完成：成功 ${ok}，失败 ${fail}`, fail ? "warn" : "ok");
+    await renderAccounts();
+  } catch (err) { flash(err.message, "bad"); }
+  finally { btn.disabled = false; }
+});
+
+/* -------------------------------------------------------------- bootstrap */
+async function ping() {
+  try {
+    const h = await api("/health");
+    $("#conn").textContent = h.turnstile_connected ? "已连接" : "CDP 未连接";
+    $("#conn").className = "pill " + (h.turnstile_connected ? "ok" : "bad");
+  } catch (e) {
+    $("#conn").textContent = "网关离线";
+    $("#conn").className = "pill bad";
+  }
+}
+
+ping();
+setInterval(ping, 30000);
+render();
 </script>
 </body>
 </html>
