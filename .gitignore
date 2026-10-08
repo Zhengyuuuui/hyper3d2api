@@ -1,0 +1,14 @@
+# secrets — never commit the live upstream token
+config.json
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# logs / runtime
+*.log
+*.pid

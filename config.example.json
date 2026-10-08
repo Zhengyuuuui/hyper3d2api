@@ -1,0 +1,12 @@
+{
+  "api_token": "sk-change-me",
+  "token": "<Hyper3D JWT from localStorage.token>",
+  "cdp_port": 9366,
+  "site_key": "0x4AAAAAADTv8yKBtK5-Zt1E",
+  "port": 4870,
+  "poll_interval": 6.0,
+  "poll_timeout": 900.0,
+  "wait_inline": true,
+  "human_pacing": true,
+  "min_credits": 5
+}

@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+httpx
+certifi
+websocket-client
