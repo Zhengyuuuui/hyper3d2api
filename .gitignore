@@ -1,6 +1,13 @@
 # secrets — never commit the live upstream token
 config.json
 
+# feature branch (batch registration) — credential stores, never commit
+accounts.jsonl
+accounts*.jsonl
+*.token
+mailbox.json
+mailbox.local.json
+
 # python
 __pycache__/
 *.py[cod]
