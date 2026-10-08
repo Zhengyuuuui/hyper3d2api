@@ -12,6 +12,74 @@ Key facts baked in from reverse-engineering (see session RECON.md §6):
 """
 
 # ---------------------------------------------------------------------------
+# 3D generation — SEPARATE API surface (`/api/v2/*`, not `/api/gateway/*`)
+# ---------------------------------------------------------------------------
+# The web session JWT does NOT work here: every /api/v2/* call returns
+#   401 {"error":"UNAUTHORIZED","message":"Active API key is required."}
+# It needs a dedicated RODIN_API_KEY issued from the API dashboard.
+# Spec is from the official docs (docs.hyper3d.ai/en/api-specification/rodin-gen2-5),
+# Confirmed via live 401 probes on /api/v2/{rodin,status,download,check_balance,bang}.
+#
+# STATUS: unverified end-to-end (Turnstile IP-rate-limited during the probe).
+# Treat as documented-Hypothesis until a real API key is used.
+THREED = {
+    "transport": "POST https://api.hyper3d.com/api/v2/rodin",
+    "content_type": "multipart/form-data",
+    "auth": "Authorization: Bearer <RODIN_API_KEY>  (separate from the web JWT)",
+    "response": {
+        "201": {"message": "Submitted.", "uuid": "<task uuid>",
+                "jobs": {"uuids": ["<job uuid>"], "subscription_key": "<key>"},
+                "consumed": 0.5},
+        "note": "use jobs.subscription_key for /api/v2/status, top-level uuid for /api/v2/download",
+    },
+    "lifecycle": {
+        "submit": "POST /api/v2/rodin",
+        "status": "POST /api/v2/status   (body: subscription_key)",
+        "download": "POST /api/v2/download (body: top-level uuid)",
+        "balance": "GET  /api/v2/check_balance",
+        "bang": "POST /api/v2/bang",
+    },
+    # tiers are the 3D "models"
+    "tiers": ["Gen-2.5-Extreme-Low", "Gen-2.5-Low", "Gen-2.5-Medium",
+              "Gen-2.5-High", "Gen-2.5-Extreme-High"],
+    "tier_default": "Regular (Gen-1/1.5)",
+    "tier_notes": {
+        "Gen-2.5-Extreme-High": "also returns an extra mesh up to 10M faces",
+        "creative": "geometry_instruct_mode=creative works on Gen-2.5-Medium+",
+    },
+    "params": {
+        "images": "array<file> 1..5  (required for Image-to-3D; omit for Text-to-3D)",
+        "prompt": "string <=1024  (required for Text-to-3D; optional guidance for Image-to-3D)",
+        "tier": "string REQUIRED (else falls back to Gen-1/1.5)",
+        "mesh_mode": "Quad | Raw (Gen-2.5 default Raw)",
+        "geometry_file_format": "glb | usdz | fbx | obj | stl  (default glb)",
+        "texture_mode": "legacy | extreme-low | low | medium | high | extreme-high",
+        "material": "PBR | Shaded | Hybrid | All | None  (default PBR)",
+        "quality": "high | medium | low | extra-low (Quad default medium / Raw default medium)",
+        "quality_override": "int 500..2000000",
+        "seed": "int 0..65535",
+        "bbox_condition": "array<int> exactly 3 (x,y,z)",
+        "addons": "array<string> e.g. HighPack (2K->4K textures)",
+        "quad_normal": "bool (bake hi-res into normal map)",
+        "soft": "bool (smooth edges)",
+        "detail_level": "int 1..3",
+        "TAPose": "bool (human rest-pose)",
+        "use_original_alpha": "bool",
+        "preview_render": "bool (extra HQ render)",
+        "is_symmetric": "symmetric | balanced | asymmetric | unknown",
+        "image_label": "array<string> viewing direction per image",
+    },
+    "pricing": {
+        "base": "0.5 credits",
+        "Gen-2.5-Extreme-High": "+0.5",
+        "texture_mode=extreme-high": "+2.0",
+        "note": "additive",
+    },
+    "fast_mode": "tier!=Extreme-High && geometry_file_format=glb && mesh_mode=Raw && quality_override<=20000",
+}
+
+
+# ---------------------------------------------------------------------------
 # Verified-usable on a Free account (2026-10-08 live tests)
 # ---------------------------------------------------------------------------
 USABLE = {
@@ -156,9 +224,31 @@ def blocked_reason(name):
     return BLOCKED.get(str(name).strip().lower())
 
 
+def list_3d_models():
+    """3D tiers as models. NOTE: these go through /api/v2/rodin (API-key gated),
+    NOT the /api/gateway/* path the other models use."""
+    now = 1757289600
+    return [
+        {
+            "id": f"rodin:{t}",
+            "object": "model",
+            "created": now,
+            "owned_by": "hyper3d/rodin",
+            "family": "3d",
+            "label": t,
+            "tier": t,
+            "endpoint": "/api/v2/rodin",
+            "auth": "RODIN_API_KEY",
+            "verified": [],
+            "status": "documented (needs API key; not live-verified)",
+        }
+        for t in THREED["tiers"]
+    ]
+
+
 def list_models():
     """OpenAI-compatible /v1/models payload."""
-    data = []
+    data = list(list_3d_models())
     for key, spec in USABLE.items():
         for m in spec["models"]:
             if spec["family"] == "video":
