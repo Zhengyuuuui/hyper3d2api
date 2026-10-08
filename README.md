@@ -25,8 +25,15 @@ pip install -r requirements.txt
 python3 bridge.py --port 4870
 ```
 
-**前置条件**：需要一个开着 `https://hyper3d.ai` 且已登录的 Chrome，**用 `--remote-debugging-port=9366` 启动**。
-Turnstile token 必须在 `hyper3d.ai` 源下渲染（token 与 sitekey 域名绑定），所以网关通过 CDP 驱动那个 Chrome 取 token，其余请求走纯 HTTP。
+**前置条件（运维模式 B，当前采用）**：常驻一个 headful Chrome（9366 端口），保持一个
+`https://hyper3d.ai` 标签页开启。Turnstile token 必须在 `hyper3d.ai` 源下渲染（token 与 sitekey
+域名绑定、**与登录态无关**），网关通过 CDP 9366 取 token，其余请求走纯 HTTP。
+
+> **IP 限流事故归档（2026-10-08）**：同一出口 IP 短时间 render 20+ 次会触发 Cloudflare IP 级限流
+> （widget iframe 不再加载、无 callback）。恢复 = 等冷却或换代理 IP。
+> 预防规则：失败不立刻重试 render；连续 3 次失败熔断 ≥30min；能用余额/provider 前置校验拦住的请求绝不烧 token。
+> 另有 `turnstile_ondemand.py`（方案 A：按需自启 headful Chrome，一次性 profile，用完自动 kill），
+> 已验证生命周期可用，作为换 IP 后的即插即用通道保留。
 
 ## 接口
 
