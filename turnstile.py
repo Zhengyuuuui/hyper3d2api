@@ -155,15 +155,27 @@ class CDPClient:
 
 
 class TurnstileTokenSource:
-    """Serialised, one-shot Turnstile tokens (each token used exactly once)."""
+    """Serialised, one-shot Turnstile tokens (each token used exactly once).
+
+    Circuit breaker: after ``fail_limit`` consecutive failures it refuses
+    renders until ``cooldown`` seconds pass — renders are the thing that gets
+    the egress IP rate-limited by Cloudflare, so hammering them is harmful.
+    """
 
     def __init__(self, port: int = 9366, site_key: str = SITE_KEY,
-                 human_pacing: bool = True):
+                 human_pacing: bool = True, fail_limit: int = 3,
+                 cooldown: float = 1800.0, min_gap: float = 3.0):
         self.port = port
         self.site_key = site_key
         self.human_pacing = human_pacing
         self._lock = threading.Lock()
         self._client: Optional[CDPClient] = None
+        self._fails = 0
+        self._fail_limit = fail_limit
+        self._cooldown = cooldown
+        self._open_until = 0.0
+        self._last_render = 0.0
+        self._min_gap = min_gap
 
     # -- lifecycle ---------------------------------------------------------
     def connect(self, reload: bool = True) -> bool:
@@ -228,6 +240,14 @@ class TurnstileTokenSource:
 
     def get_token(self, attempts: int = 3) -> str:
         with self._lock:
+            now = time.time()
+            if now < self._open_until:
+                raise CDPError(
+                    f"turnstile circuit breaker open (~{int(self._open_until-now)}s cooldown); "
+                    "too many failed renders — wait or rotate egress IP")
+            gap = now - self._last_render
+            if gap < self._min_gap:
+                time.sleep(self._min_gap - gap)
             last = None
             for attempt in range(attempts):
                 try:
@@ -250,6 +270,8 @@ class TurnstileTokenSource:
                                 pass
                             if not tok:
                                 raise CDPError("empty token")
+                            self._fails = 0
+                            self._last_render = time.time()
                             return tok
                     raise TimeoutError("turnstile watchdog")
                 except Exception as e:  # noqa: BLE001
@@ -261,4 +283,9 @@ class TurnstileTokenSource:
                     except Exception:
                         pass
                     time.sleep(random.uniform(4, 8))
+            self._fails += 1
+            self._last_render = time.time()
+            if self._fails >= self._fail_limit:
+                self._open_until = time.time() + self._cooldown
+                self._fails = 0
             raise CDPError(f"could not obtain Turnstile token after {attempts} attempts: {last}")

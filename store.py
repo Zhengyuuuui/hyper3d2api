@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -98,18 +99,43 @@ def now_iso() -> str:
 
 
 class AccountStore:
+    """Thread-safe: sqlite connections are per-thread (FastAPI runs sync
+    endpoints on arbitrary threadpool threads; a shared connection raises
+    ProgrammingError)."""
+
     def __init__(self, path: str = DEFAULT_DB):
         self.path = path
-        self._conn = sqlite3.connect(path, timeout=30)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        self._conn.executescript(SCHEMA)
-        self._conn.commit()
+        self._local = threading.local()
+        self._write_lock = threading.Lock()
+        # initialize schema once on a dedicated connection
+        conn = self._new_conn()
+        try:
+            conn.executescript(SCHEMA)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _new_conn(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._new_conn()
+            self._local.conn = conn
+        return conn
 
     # -- lifecycle ---------------------------------------------------------
     def close(self):
-        self._conn.close()
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None
 
     def __enter__(self):
         return self
@@ -120,6 +146,10 @@ class AccountStore:
     # -- writes ------------------------------------------------------------
     def upsert(self, acct: Dict[str, Any]) -> int:
         """Insert or update by email. Returns the row id."""
+        with self._write_lock:
+            return self._upsert(acct)
+
+    def _upsert(self, acct: Dict[str, Any]) -> int:
         data = {k: acct.get(k) for k in COLUMNS}
         if data.get("registered_at") is None:
             data["registered_at"] = now_iso()
@@ -156,6 +186,10 @@ class AccountStore:
         return rid
 
     def mark_status(self, email: str, status: str, note: Optional[str] = None) -> None:
+        with self._write_lock:
+            self._mark_status(email, status, note)
+
+    def _mark_status(self, email: str, status: str, note: Optional[str] = None) -> None:
         if note is None:
             self._conn.execute(
                 "UPDATE accounts SET status=?, last_checked_at=? WHERE email=?",
@@ -168,6 +202,11 @@ class AccountStore:
 
     def set_balance(self, email: str, balance: float, plan: Optional[str] = None,
                     trial: Optional[bool] = None) -> None:
+        with self._write_lock:
+            self._set_balance(email, balance, plan, trial)
+
+    def _set_balance(self, email: str, balance: float, plan: Optional[str] = None,
+                     trial: Optional[bool] = None) -> None:
         sets = ["balance = ?", "last_checked_at = ?"]
         vals: List[Any] = [balance, now_iso()]
         if plan is not None:
@@ -183,6 +222,13 @@ class AccountStore:
     def record_use(self, email: str, *, job_id: Optional[str] = None,
                    kind: Optional[str] = None, model: Optional[str] = None,
                    credits: float = 0.0, balance_after: Optional[float] = None) -> None:
+        with self._write_lock:
+            self._record_use(email, job_id=job_id, kind=kind, model=model,
+                             credits=credits, balance_after=balance_after)
+
+    def _record_use(self, email: str, *, job_id: Optional[str] = None,
+                    kind: Optional[str] = None, model: Optional[str] = None,
+                    credits: float = 0.0, balance_after: Optional[float] = None) -> None:
         self._conn.execute(
             "UPDATE accounts SET gen_count = gen_count + 1, credits_used = credits_used + ?, "
             "last_used_at = ? WHERE email = ?", (credits, now_iso(), email))
@@ -221,6 +267,22 @@ class AccountStore:
             "ORDER BY COALESCE(balance,0) DESC, gen_count ASC LIMIT 1",
             (min_balance,)).fetchall()
         return dict(rows[0]) if rows else None
+
+    def delete(self, email: str) -> bool:
+        with self._write_lock:
+            cur = self._conn.execute("DELETE FROM accounts WHERE email = ?", (email,))
+            self._conn.commit()
+            return cur.rowcount > 0
+
+    def ledger(self, email: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM ledger"
+        args: List[Any] = []
+        if email:
+            sql += " WHERE email = ?"
+            args.append(email)
+        sql += " ORDER BY id DESC LIMIT ?"
+        args.append(limit)
+        return [dict(r) for r in self._conn.execute(sql, args).fetchall()]
 
     def stats(self) -> Dict[str, Any]:
         row = self._conn.execute(

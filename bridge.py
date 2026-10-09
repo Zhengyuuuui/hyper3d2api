@@ -360,13 +360,16 @@ def get_job(job_id: str, authorization: Optional[str] = Depends(check_auth)):
 
 @app.get("/health")
 def health():
-    st = account_store()
+    try:
+        accounts = account_store().stats()
+    except Exception:
+        accounts = None
     return {
         "ok": True,
         "upstream_token_configured": bool(CONFIG.get("token")),
         "turnstile_connected": _tokens.healthy(),
         "models": [m["id"] for m in R.list_models()["data"]],
-        "accounts": st.stats(),
+        "accounts": accounts,
     }
 
 
@@ -467,8 +470,7 @@ def admin_account_delete(email: str, authorization: Optional[str] = Depends(chec
     st = account_store()
     if not st.get(email):
         raise err("not_found", f"account {email} not found", 404)
-    with st._conn:  # noqa: SLF001
-        st._conn.execute("DELETE FROM accounts WHERE email = ?", (email,))  # noqa: SLF001
+    st.delete(email)
     return {"deleted": email}
 
 
@@ -490,16 +492,7 @@ def admin_jobs(authorization: Optional[str] = Depends(check_auth),
 @app.get("/admin/api/ledger")
 def admin_ledger(authorization: Optional[str] = Depends(check_auth),
                  email: Optional[str] = None, limit: int = 100):
-    st = account_store()
-    sql = "SELECT * FROM ledger"
-    args: list = []
-    if email:
-        sql += " WHERE email = ?"
-        args.append(email)
-    sql += " ORDER BY id DESC LIMIT ?"
-    args.append(limit)
-    rows = [dict(r) for r in st._conn.execute(sql, args).fetchall()]  # noqa: SLF001
-    return rows
+    return account_store().ledger(email=email, limit=limit)
 
 
 @app.get("/")
