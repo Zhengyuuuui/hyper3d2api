@@ -93,6 +93,7 @@
   .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
   .pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
   .muted { color: var(--muted); }
+  .ok { color: var(--ok); }
   .tiny { font-size: 11px; }
   .stale { color: var(--bad); }
   .mono { font-family: ui-monospace, monospace; font-size: 12px; }
@@ -196,6 +197,38 @@
       <tbody id="accounts-body"></tbody>
     </table>
   </div>
+  <div class="panel">
+    <h2>有头浏览器注册（批量养号）</h2>
+    <p class="muted" style="margin-top:0">
+      需本机 Chrome（CDP <span class="mono" id="signup-cdp-port">9366</span>）保持一个 hyper3d.ai 标签页开启：
+      渲染 Turnstile 取 token → 邮箱服务发验证码 → 轮询收件箱取码 → 注册 → 查余额 → 自动入号池。
+      注册本身不要验证码，<b>发验证码邮件</b>要 Turnstile，因此每个账号消耗一次 render（受熔断保护）。
+    </p>
+    <div class="row">
+      <div style="flex:1;min-width:220px"><label>邮箱服务 API 地址</label><input id="signup-mail-base" placeholder="https://xxx.workers.dev"></div>
+      <div style="flex:0 0 auto"><label>邮箱域名</label><input id="signup-mail-domain" placeholder="example.com" style="width:170px"></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div style="flex:0 0 auto"><label>Admin Passkey</label>
+        <span class="secret-field" style="width:220px">
+          <input id="signup-mail-pass" type="password" autocomplete="new-password" placeholder="已设置则留空不变">
+          <button type="button" class="ghost reveal" data-reveal="signup-mail-pass">显示</button>
+        </span>
+      </div>
+      <div style="flex:0 0 auto"><label>&nbsp;</label><button id="signup-mail-save" class="ghost">保存邮箱配置</button></div>
+      <div class="muted" id="signup-mail-hint" style="align-self:center"></div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div><label>账号名称前缀（可选）</label><input id="signup-name" placeholder="例如：批量号，留空用 h3d" style="width:200px"></div>
+      <div><label>数量</label><input id="signup-count" type="number" min="1" max="20" value="1" style="width:80px"></div>
+      <div><label>初始密码（可选）</label><input id="signup-password" type="text" placeholder="留空则每个账号随机 14 位"></div>
+      <div style="flex:0 0 auto"><label>&nbsp;</label><button id="signup-start">开始注册</button></div>
+      <div style="flex:0 0 auto"><label>&nbsp;</label><button id="signup-cancel" class="ghost" hidden>取消</button></div>
+    </div>
+    <div id="signup-status" style="margin-top:10px"></div>
+    <pre id="signup-log" hidden style="margin-top:10px;max-height:260px"></pre>
+  </div>
+
   <div class="panel">
     <h2>调用示例</h2>
     <p class="muted" style="margin-top:0">网关把 <code>/v1/*</code> 请求分发到号池；下面是 curl 示例。</p>
@@ -429,6 +462,11 @@ async function renderOverview() {
 }
 
 async function renderAccounts() {
+  loadSignupMail().catch(() => {});
+  api("/admin/api/signup/status").then((st) => {
+    renderSignup(st.running);
+    if (st.running && !signupTimer) signupTimer = setInterval(pollSignup, 1500);
+  }).catch(() => {});
   const filter = $("#acc-filter").value;
   const q = filter ? `?status=${encodeURIComponent(filter)}` : "";
   const rows = await api("/admin/api/accounts" + q);
@@ -628,6 +666,104 @@ $("#acc-check-all").addEventListener("click", async (e) => {
     await renderAccounts();
   } catch (err) { flash(err.message, "bad"); }
   finally { btn.disabled = false; }
+});
+
+/* ------------------------------------------------------------------ signup */
+let signupTimer = null;
+
+function revealSecret(button) {
+  const input = document.getElementById(button.dataset.reveal);
+  if (!input) return;
+  const shown = input.type === "text";
+  input.type = shown ? "password" : "text";
+  button.textContent = shown ? "显示" : "隐藏";
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button.reveal[data-reveal]");
+  if (b) revealSecret(b);
+});
+
+async function loadSignupMail() {
+  const cfg = await api("/admin/api/signup/mail_config");
+  if (!$("#signup-mail-base").value) $("#signup-mail-base").value = cfg.mail_api_base || "";
+  if (!$("#signup-mail-domain").value) $("#signup-mail-domain").value = cfg.mail_domain || "";
+  $("#signup-mail-pass").placeholder = cfg.passkey_set ? "已设置，留空则不变" : "管理密钥";
+  $("#signup-cdp-port").textContent = cfg.cdp_port || 9366;
+  $("#signup-mail-hint").textContent = cfg.mail_ready
+    ? "邮箱配置就绪"
+    : "邮箱未配置：需 API 地址 + 域名 + Passkey";
+  $("#signup-mail-hint").className = cfg.mail_ready ? "tiny ok" : "tiny stale";
+}
+
+function signupStatusLine(sess) {
+  if (!sess) return "";
+  const done = sess.state === "done", err = sess.state === "error";
+  const kind = err ? "bad" : done ? "ok" : "warn";
+  return `<span class="pill ${kind}">${sess.state}</span> `
+    + `成功 <b>${sess.created}</b> / 失败 <b>${sess.failed}</b> / 共 ${sess.count}`
+    + ` <span class="muted tiny">耗时 ${sess.elapsed}s</span>`
+    + (sess.current ? ` <span class="muted tiny">· ${sess.current}</span>` : "")
+    + (sess.error ? ` <div class="stale tiny">${sess.error}</div>` : "");
+}
+
+function renderSignup(sess) {
+  $("#signup-status").innerHTML = signupStatusLine(sess);
+  const running = sess && (sess.state === "running" || sess.state === "queued");
+  $("#signup-cancel").hidden = !running;
+  $("#signup-start").disabled = !!running;
+  if (!sess) { $("#signup-log").hidden = true; return; }
+  $("#signup-log").hidden = false;
+  $("#signup-log").textContent = (sess.lines || [])
+    .map(l => `[${l.at}] ${l.text}`).join("\n");
+  $("#signup-log").scrollTop = $("#signup-log").scrollHeight;
+}
+
+async function pollSignup() {
+  try {
+    const st = await api("/admin/api/signup/status");
+    renderSignup(st.running);
+    if (!st.running && signupTimer) {
+      clearInterval(signupTimer); signupTimer = null;
+      await renderAccounts().catch(() => {});
+    }
+  } catch (e) { /* transient */ }
+}
+
+$("#signup-mail-save").addEventListener("click", async () => {
+  try {
+    const r = await api("/admin/api/signup/mail_config", {
+      method: "POST",
+      body: JSON.stringify({
+        mail_api_base: $("#signup-mail-base").value.trim(),
+        mail_domain: $("#signup-mail-domain").value.trim(),
+        mail_admin_passkey: $("#signup-mail-pass").value.trim(),
+      }),
+    });
+    flash(r.saved ? "邮箱配置已保存" : "无变化", "ok");
+    $("#signup-mail-pass").value = "";
+    await loadSignupMail();
+  } catch (e) { flash(e.message, "bad"); }
+});
+
+$("#signup-start").addEventListener("click", async () => {
+  try {
+    const sess = await api("/admin/api/signup/start", {
+      method: "POST",
+      body: JSON.stringify({
+        count: Number($("#signup-count").value) || 1,
+        name: $("#signup-name").value,
+        password: $("#signup-password").value,
+      }),
+    });
+    renderSignup(sess);
+    if (!signupTimer) signupTimer = setInterval(pollSignup, 1500);
+    flash("注册任务已启动", "ok");
+  } catch (e) { flash(e.message, "bad"); }
+});
+
+$("#signup-cancel").addEventListener("click", async () => {
+  try { await api("/admin/api/signup/cancel", { method: "POST" }); flash("已请求取消", "ok"); }
+  catch (e) { flash(e.message, "bad"); }
 });
 
 /* -------------------------------------------------------------- bootstrap */

@@ -30,6 +30,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 import registry as R
 from hyper3d import Hyper3DClient, Hyper3DError
+from signup import SignupManager
 from store import AccountStore
 from turnstile import TurnstileTokenSource
 
@@ -47,7 +48,16 @@ DEFAULT_CONFIG = {
     "wait_inline": True,
     "human_pacing": True,
     "min_credits": 5,   # refuse to burn a Turnstile token below this balance
+    # mail service for batch signup (CF temp-email worker)
+    "mail_api_base": "",
+    "mail_admin_passkey": "",
+    "mail_domain": "",
+    "register_delay": [8, 20],
+    "code_timeout": 180,
 }
+
+# keys the console may write through /admin/api/signup/mail_config
+MAIL_CONFIG_KEYS = ("mail_api_base", "mail_admin_passkey", "mail_domain")
 
 
 def load_config() -> Dict[str, Any]:
@@ -66,6 +76,12 @@ _tokens = TurnstileTokenSource(port=CONFIG["cdp_port"], site_key=CONFIG["site_ke
                                human_pacing=CONFIG["human_pacing"])
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
+
+def save_config(cfg: Dict[str, Any]) -> None:
+    """Persist mutable keys back to config.json (secrets included; file is gitignored)."""
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
 
 # account pool
 _STORE: Optional[AccountStore] = None
@@ -376,6 +392,8 @@ def health():
 # --------------------------------------------------------------------------
 # admin API (used by console.html)
 # --------------------------------------------------------------------------
+
+_signup = SignupManager(account_store(), _tokens, CONFIG)
 @app.get("/admin/api/overview")
 def admin_overview(authorization: Optional[str] = Depends(check_auth)):
     st = account_store()
@@ -495,12 +513,95 @@ def admin_ledger(authorization: Optional[str] = Depends(check_auth),
     return account_store().ledger(email=email, limit=limit)
 
 
+
+# ---------------------------------------------------------------- signup ----
+@app.get("/admin/api/signup/mail_config")
+def signup_mail_config(authorization: Optional[str] = Depends(check_auth)):
+    return {
+        "mail_api_base": CONFIG.get("mail_api_base") or "",
+        "mail_domain": CONFIG.get("mail_domain") or "",
+        # never ship the passkey to the browser; report presence only
+        "passkey_set": bool(CONFIG.get("mail_admin_passkey")),
+        "cdp_port": CONFIG.get("cdp_port"),
+        "min_credits": CONFIG.get("min_credits"),
+        "mail_ready": _signup.mail_ready,
+    }
+
+
+@app.post("/admin/api/signup/mail_config")
+def signup_mail_config_save(body: Dict[str, Any],
+                            authorization: Optional[str] = Depends(check_auth)):
+    changed = False
+    for k in MAIL_CONFIG_KEYS:
+        v = body.get(k)
+        if v is None:
+            continue
+        v = str(v).strip()
+        if k == "mail_admin_passkey" and not v:
+            continue  # empty passkey means "keep current"
+        if CONFIG.get(k) != v:
+            CONFIG[k] = v
+            changed = True
+    if changed:
+        save_config(CONFIG)
+    return {"saved": changed, "mail_ready": _signup.mail_ready}
+
+
+@app.post("/admin/api/signup/start")
+def signup_start(body: Dict[str, Any], authorization: Optional[str] = Depends(check_auth)):
+    try:
+        sess = _signup.start(
+            count=int(body.get("count", 1)),
+            name=(body.get("name") or "").strip() or None,
+            password=(body.get("password") or "").strip() or None,
+        )
+    except ValueError as e:
+        raise err("bad_request", str(e), 400)
+    except RuntimeError as e:
+        raise err("busy", str(e), 409)
+    return sess.snapshot()
+
+
+@app.get("/admin/api/signup/status")
+def signup_status(authorization: Optional[str] = Depends(check_auth)):
+    sess = _signup.active()
+    return {
+        "running": sess.snapshot() if sess else None,
+        "mail_ready": _signup.mail_ready,
+        "turnstile_connected": _tokens.healthy(),
+    }
+
+
+@app.get("/admin/api/signup/session/{sid}")
+def signup_session(sid: str, authorization: Optional[str] = Depends(check_auth)):
+    sess = _signup.get(sid)
+    if not sess:
+        raise err("not_found", f"signup session {sid} not found", 404)
+    return sess.snapshot()
+
+
+@app.post("/admin/api/signup/cancel")
+def signup_cancel(authorization: Optional[str] = Depends(check_auth)):
+    sess = _signup.active()
+    if not sess:
+        raise err("not_found", "no active signup session", 404)
+    sess.cancel()
+    return {"cancelled": sess.sid}
+
+
+@app.post("/admin/api/signup/clear")
+def signup_clear(authorization: Optional[str] = Depends(check_auth)):
+    return {"cleared": _signup.clear_finished()}
+
+
 @app.get("/")
 @app.get("/console")
 def console():
     path = os.path.join(HERE, "console.html")
     if os.path.exists(path):
-        return FileResponse(path)
+        # no-store: console.html changes between restarts and the browser
+        # otherwise keeps serving the previous build
+        return FileResponse(path, headers={"Cache-Control": "no-store"})
     return JSONResponse({"service": "hyper3d2api", "docs": "/docs"})
 
 
