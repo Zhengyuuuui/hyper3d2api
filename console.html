@@ -191,7 +191,7 @@
     </div>
     <table>
       <thead><tr>
-        <th>账号</th><th>UUID</th><th>余额</th><th>套餐</th><th>状态</th>
+        <th>账号</th><th>UUID</th><th>密码</th><th>余额</th><th>套餐</th><th>状态</th>
         <th>生成</th><th>已耗</th><th>检查</th><th>操作</th>
       </tr></thead>
       <tbody id="accounts-body"></tbody>
@@ -461,6 +461,13 @@ async function renderOverview() {
   ])).join("") || row(['<td colspan="6" class="muted">还没有任务</td>']);
 }
 
+function passwordCell(acc) {
+  if (!acc.password_set) return `<span class="muted tiny">未记录</span>`;
+  return `<span class="mono" id="pw-${acc.id}">${acc.password_preview || "••••••"}</span> `
+    + `<button class="ghost small" data-acc-act="reveal-pw" data-email="${acc.email}" data-id="${acc.id}">显示</button> `
+    + `<button class="ghost small" data-acc-act="copy-pw" data-email="${acc.email}" data-id="${acc.id}">复制</button>`;
+}
+
 async function renderAccounts() {
   loadSignupMail().catch(() => {});
   api("/admin/api/signup/status").then((st) => {
@@ -474,6 +481,7 @@ async function renderAccounts() {
   $("#accounts-body").innerHTML = rows.map((acc) => row([
     `<b>${acc.username || acc.email.split("@")[0]}</b><br><span class="tiny mono muted">${acc.email}</span>`,
     `<span class="mono tiny">${(acc.user_uuid || "").slice(0, 8)}…</span>`,
+    passwordCell(acc),
     balanceCell(acc),
     acc.plan || "-",
     accountStatusCell(acc),
@@ -487,7 +495,7 @@ async function renderAccounts() {
         : `<button class="start small" data-acc-act="enable" data-email="${acc.email}">启用</button>`,
       `<button class="danger small" data-acc-act="delete" data-email="${acc.email}">删除</button>`,
     ].join(" "),
-  ])).join("") || row(['<td colspan="9" class="muted">号池为空</td>']);
+  ])).join("") || row(['<td colspan="10" class="muted">号池为空</td>']);
 
   $("#usage-snippet").textContent =
 `# 视频
@@ -643,6 +651,18 @@ $("#accounts-body").addEventListener("click", async (e) => {
     } else if (act === "enable") {
       await api(`/admin/api/accounts/${encodeURIComponent(email)}/status`, { method: "POST", body: JSON.stringify({ status: "active" }) });
       flash("已启用", "ok");
+    } else if (act === "reveal-pw") {
+      const r = await api(`/admin/api/accounts/${encodeURIComponent(email)}/password`);
+      const cell = document.getElementById("pw-" + btn.dataset.id);
+      if (cell) cell.textContent = r.password || "(未记录)";
+      btn.outerHTML = "";
+      return;
+    } else if (act === "copy-pw") {
+      const r = await api(`/admin/api/accounts/${encodeURIComponent(email)}/password`);
+      if (!r.password) { flash("该账号未记录密码", "bad"); return; }
+      await navigator.clipboard.writeText(r.password);
+      flash("密码已复制（仅本机）", "ok");
+      return;
     } else if (act === "delete") {
       if (!confirm("删除 " + email + "？此操作不可撤销。")) return;
       await api(`/admin/api/accounts/${encodeURIComponent(email)}`, { method: "DELETE" });

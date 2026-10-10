@@ -416,16 +416,24 @@ def admin_overview(authorization: Optional[str] = Depends(check_auth)):
     }
 
 
+def _mask_secrets(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Listings never carry raw credentials; presence + a short preview only.
+    Reveal is an explicit, per-field, audited endpoint."""
+    pw = r.get("password")
+    r["password_set"] = bool(pw)
+    r["password_preview"] = (pw[:2] + "•" * (len(pw) - 2)) if pw else None
+    r.pop("password", None)
+    r["token_preview"] = ((r.get("token") or "")[:16] + "…") if r.get("token") else None
+    r.pop("token", None)
+    return r
+
+
 @app.get("/admin/api/accounts")
 def admin_accounts(authorization: Optional[str] = Depends(check_auth),
                    status: Optional[str] = None,
                    min_balance: Optional[float] = None):
     rows = account_store().list(status=status, min_balance=min_balance)
-    # never expose raw tokens in listing
-    for r in rows:
-        r["token_preview"] = (r.get("token") or "")[:16] + "…" if r.get("token") else None
-        r.pop("token", None)
-    return rows
+    return [_mask_secrets(r) for r in rows]
 
 
 @app.get("/admin/api/accounts/{email}")
@@ -433,9 +441,7 @@ def admin_account(email: str, authorization: Optional[str] = Depends(check_auth)
     r = account_store().get(email)
     if not r:
         raise err("not_found", f"account {email} not found", 404)
-    r["token_preview"] = (r.get("token") or "")[:20] + "…"
-    r.pop("token", None)
-    return r
+    return _mask_secrets(r)
 
 
 @app.get("/admin/api/accounts/{email}/token")
@@ -444,6 +450,15 @@ def admin_account_token(email: str, authorization: Optional[str] = Depends(check
     if not r:
         raise err("not_found", f"account {email} not found", 404)
     return {"email": email, "token": r.get("token")}
+
+
+@app.get("/admin/api/accounts/{email}/password")
+def admin_account_password(email: str, authorization: Optional[str] = Depends(check_auth)):
+    """Explicit reveal for the console table (gateway-auth protected)."""
+    r = account_store().get(email)
+    if not r:
+        raise err("not_found", f"account {email} not found", 404)
+    return {"email": email, "password": r.get("password")}
 
 
 @app.post("/admin/api/accounts/{email}/check")
