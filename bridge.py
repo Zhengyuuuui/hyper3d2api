@@ -580,8 +580,10 @@ def signup_start(body: Dict[str, Any], authorization: Optional[str] = Depends(ch
 @app.get("/admin/api/signup/status")
 def signup_status(authorization: Optional[str] = Depends(check_auth)):
     sess = _signup.active()
+    last = _signup.last()
     return {
         "running": sess.snapshot() if sess else None,
+        "last": last.snapshot() if (last and last is not sess) else None,
         "mail_ready": _signup.mail_ready,
         "turnstile_connected": _tokens.healthy(),
     }

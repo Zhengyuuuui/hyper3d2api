@@ -97,6 +97,7 @@ class SignupManager:
         self._sessions: Dict[str, SignupSession] = {}
         self._lock = threading.Lock()
         self._running: Optional[str] = None
+        self._last: Optional[str] = None   # most recently finished session, for console replay
 
     # -- public ------------------------------------------------------------
     @property
@@ -113,6 +114,15 @@ class SignupManager:
         if s and s.state in ("queued", "running"):
             return s
         return None
+
+    def last(self) -> Optional[SignupSession]:
+        """Most recently finished session (kept so the console can show the
+        final state + full log instead of blanking when the run ends)."""
+        with self._lock:
+            sid = self._last
+        if not sid:
+            return None
+        return self._sessions.get(sid)
 
     def start(self, *, count: int = 1, name: Optional[str] = None,
               password: Optional[str] = None,
@@ -160,6 +170,8 @@ class SignupManager:
                 if s.state in ("done", "cancelled", "error"):
                     self._sessions.pop(sid)
                     n += 1
+            if self._last is not None and self._last not in self._sessions:
+                self._last = None
         return n
 
     # -- worker ------------------------------------------------------------
@@ -195,10 +207,11 @@ class SignupManager:
         finally:
             sess.current = None
             sess.finished_at = time.time()
+            sess.log(f"结束：成功 {sess.created}，失败 {sess.failed}", "ok" if sess.created else "warn")
             with self._lock:
                 if self._running == sess.sid:
                     self._running = None
-            sess.log(f"结束：成功 {sess.created}，失败 {sess.failed}", "ok" if sess.created else "warn")
+                self._last = sess.sid
 
     def _sleep(self, sess: SignupSession, seconds: float) -> None:
         end = time.time() + seconds

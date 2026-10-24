@@ -471,7 +471,7 @@ function passwordCell(acc) {
 async function renderAccounts() {
   loadSignupMail().catch(() => {});
   api("/admin/api/signup/status").then((st) => {
-    renderSignup(st.running);
+    renderSignup(st.running || st.last);
     if (st.running && !signupTimer) signupTimer = setInterval(pollSignup, 1500);
   }).catch(() => {});
   const filter = $("#acc-filter").value;
@@ -741,7 +741,7 @@ function renderSignup(sess) {
 async function pollSignup() {
   try {
     const st = await api("/admin/api/signup/status");
-    renderSignup(st.running);
+    renderSignup(st.running || st.last);
     if (!st.running && signupTimer) {
       clearInterval(signupTimer); signupTimer = null;
       await renderAccounts().catch(() => {});
